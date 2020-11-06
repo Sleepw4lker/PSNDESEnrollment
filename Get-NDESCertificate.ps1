@@ -1,6 +1,7 @@
 [cmdletbinding()]
 param(
     [Parameter(Mandatory=$True)]
+    [ValidateNotNullOrEmpty()]
     [String]
     $ComputerName,
 
@@ -8,7 +9,8 @@ param(
     [String]
     $Subject = "CN=",
 
-    [Parameter(Mandatory=$True)]
+    [Parameter(Mandatory=$False)]
+    [ValidateNotNullOrEmpty()]
     [String]
     $ChallengePassword,
 
