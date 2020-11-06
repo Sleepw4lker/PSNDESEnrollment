@@ -130,15 +130,15 @@ process {
 
     $Helper = New-Object -ComObject "X509Enrollment.CX509SCEPEnrollmentHelper"
 
-    $Helper.Initialize(
-        $ConfigString,
-        [String]::Empty,
-        $Pkcs10,
-        [String]::Empty
-        )
-
-    # Enroll for the Certificate via NDES
     try {
+        $Helper.Initialize(
+            $ConfigString,
+            [String]::Empty,
+            $Pkcs10,
+            [String]::Empty
+            )
+
+        # Enroll for the Certificate via NDES
         $Disposition = $Helper.Enroll($SCEPProcessDefault)
     }
     catch {
@@ -152,7 +152,11 @@ process {
             # Throw the HTML Response of the SCEP Request which will contain the Error Code
             Write-Error $Helper.ResultMessageText
 
-            # Das Zertifikat ist für den angeforderten Zweck nicht zugelassen. 0x800b0110 (-2146762480 CERT_E_WRONG_USAGE) - Wrong Password
+            <#
+            0x800b0110 (-2146762480 CERT_E_WRONG_USAGE) - OTP has already been used
+            0x80096004 (-2146869244 TRUST_E_CERT_SIGNATURE) - OTP required but none supplied
+            0x80070490 (WIN32: 1168 ERROR_NOT_FOUND) - Wrong/Unknown OTP supplied
+            #>
         }
         $SCEPDispositionSuccess {
             # Show the Certificate, but it is also installed in the selected Certificate Store
