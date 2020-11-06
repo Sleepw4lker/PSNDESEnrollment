@@ -1,6 +1,7 @@
 [cmdletbinding()]
 param(
     [Parameter(Mandatory=$True)]
+    [ValidateNotNullOrEmpty()]
     [String]
     $ComputerName,
 
