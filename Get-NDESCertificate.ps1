@@ -54,9 +54,18 @@ begin {
 
     New-Variable -Option Constant -Name SCEPDispositionSuccess -Value 0
     New-Variable -Option Constant -Name SCEPDispositionFailure -Value 2
+
+    New-Variable -Option Constant -Name BUILD_NUMBER_WINDOWS_10 -Value 10240
+
 }
 
 process {
+
+    # Ensuring the Code will be executed on a supported Operating System
+    If ([int32](Get-WmiObject Win32_OperatingSystem).BuildNumber -lt $BUILD_NUMBER_WINDOWS_10) {
+        Write-Error "This must be executed on Windows 10 or newer! Aborting."
+        Return 
+    }
 
     If ($MachineContext.IsPresent) {
 
