@@ -489,14 +489,29 @@ Function Get-NDESCertificate {
                     $ErrorMessage += "SCEP Failure Information: $($FailInfo.Message) ($($FailInfo.Code)) $($FailInfo.Description)`n"
                     $ErrorMessage += "Additional Information returned by the Server: $($SCEPEnrollmentInterface.Status().Text)`n"
 
+                    # CERT_E_WRONG_USAGE
                     If ($SCEPEnrollmentInterface.Status().Text -match "0x800b0110") {
-                        $ErrorMessage += "Possible reason(s): The OTP has already been used before."
+                        $ErrorMessage += "Possible reason(s): The Challenge Password has already been used before."
                     }
+
+                    # TRUST_E_CERT_SIGNATURE
                     If ($SCEPEnrollmentInterface.Status().Text -match "0x80096004") {
-                        $ErrorMessage += "Possible reason(s): The NDES Server requires an but none was supplied."
+                        $ErrorMessage += "Possible reason(s): The NDES Server requires a Challenge Password but none was supplied."
                     }
+
+                    # ERROR_NOT_FOUND
                     If ($SCEPEnrollmentInterface.Status().Text -match "0x80070490") {
-                        $ErrorMessage += "Possible reason(s): The OTP supplied is unknown to the NDES Server."
+                        $ErrorMessage += "Possible reason(s): The Challenge Password supplied is unknown to the NDES Server."
+                    }
+
+                    # CERTSRV_E_BAD_REQUESTSUBJECT
+                    If ($SCEPEnrollmentInterface.Status().Text -match "0x80094001") {
+                        $ErrorMessage += "Possible reason(s): The CA denied your request because an invalid Subject was requested."
+                    }
+
+                    # RPC_S_SERVER_UNAVAILABLE
+                    If ($SCEPEnrollmentInterface.Status().Text -match "0x800706ba") {
+                        $ErrorMessage += "Possible reason(s): The NDES Server was unable to contact the Certification Authority."
                     }
 
                     Write-Error -Message $ErrorMessage
