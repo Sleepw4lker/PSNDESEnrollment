@@ -78,7 +78,7 @@ Function Get-NDESCertificate {
         [Parameter(ParameterSetName="NewRequest",Mandatory=$False)]
         [ValidateNotNullOrEmpty()]
         [String]
-        $Subject = "CN=",
+        $Subject,
 
         [Parameter(ParameterSetName="NewRequest",Mandatory=$False)]
         [ValidateNotNullOrEmpty()]
@@ -252,7 +252,13 @@ Function Get-NDESCertificate {
         # Invoke-WebRequest -uri "$($ConfigString)?operation=GetCACaps" or
         # GetCAProperty with the CR_PROP_SCEPSERVERCAPABILITIES PropId
         # There is also a Method put_ServerCapabilities which maybe can be fed with the output
-        $GetCACaps = Invoke-WebRequest -uri "$($ConfigString)?operation=GetCACaps"
+        Try {
+            $GetCACaps = Invoke-WebRequest -uri "$($ConfigString)?operation=GetCACaps"
+        }
+        Catch {
+            Write-Error -Message $PSItem.Exception
+            return
+        }
 
         $Pkcs10 = New-Object -ComObject "X509Enrollment.CX509CertificateRequestPkcs10"
 
@@ -291,6 +297,11 @@ Function Get-NDESCertificate {
         }
         Else {
 
+            If ((-not $DnsName) -and (-not $Upn) -and ((-not $Subject) -or ($Subject -eq "CN="))) {
+                Write-Error -Message "You must provide an Identity, either in Form ob a Subject or Subject Alternative Name!"
+                return
+            }
+
             $Pkcs10.Initialize([int]($MachineContext.IsPresent)+1)
 
             Try {
@@ -300,7 +311,8 @@ Function Get-NDESCertificate {
                 $Pkcs10.Subject = $DnObject
             }
             Catch {
-                #
+                Write-Error -Message "Invalid Subject DN supplied!"
+                return
             }
 
             # Set the Subject Alternative Names Extension if specified as Argument
