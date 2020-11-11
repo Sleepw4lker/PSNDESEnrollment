@@ -162,6 +162,13 @@ Function Get-NDESCertificate {
 
         New-Variable -Option Constant -Name BUILD_NUMBER_WINDOWS_8_1 -Value 9600
 
+        # https://docs.microsoft.com/en-us/windows/win32/api/certpol/ne-certpol-x509scepdisposition
+        New-Variable -Option Constant -Name SCEPDispositionFailure -Value 2
+        New-Variable -Option Constant -Name SCEPDispositionPending -Value 3
+        New-Variable -Option Constant -Name SCEPDispositionPendingChallenge -Value 11
+        New-Variable -Option Constant -Name SCEPDispositionSuccess -Value 0
+        New-Variable -Option Constant -Name SCEPDispositionUnknown -Value -1
+
         # https://docs.microsoft.com/en-us/windows/win32/api/certenroll/nf-certenroll-ix509certificaterequestpkcs10-initializefromcertificate
         New-Variable -Option Constant -Name InheritDefault -Value 0x00000000
         New-Variable -Option Constant -Name InheritRenewalCertificateFlag -Value 0x00000020
@@ -171,6 +178,37 @@ Function Get-NDESCertificate {
         New-Variable -Option Constant -Name InheritSubjectAltNameFlag -Value 0x00000200
         
         Add-Type -AssemblyName System.Security
+
+        # https://tools.ietf.org/html/draft-nourse-scep-23#section-3.1.1.4
+        $SCEPFailInfo = @(
+
+            @{
+                Code = 0
+                Message = "badAlg"
+                Description = "Unrecognized or unsupported algorithm identifier"
+            }
+            @{
+                Code = 1
+                Message = "badMessageCheck"
+                Description = "integrity check failed"
+            }
+            @{
+                Code = 2
+                Message = "badRequest"
+                Description = "transaction not permitted or supported"
+            }
+            @{
+                Code = 3
+                Message = "badTime"
+                Description = "The signingTime attribute from the PKCS#7 authenticatedAttributes was not sufficiently close to the system time."
+            }
+            @{
+                Code = 4
+                Message = "badCertId"
+                Description = "No certificate could be identified matching the provided criteria."
+            }
+
+        )
     }
 
     process {
@@ -374,7 +412,7 @@ Function Get-NDESCertificate {
         # Sets the preferred hash and encryption algorithms for the request.
         # If you do not set this property, then the default hash and encryption algorithms will be used.
         # https://docs.microsoft.com/en-us/windows/win32/api/certenroll/nf-certenroll-ix509scepenrollment-put_servercapabilities
-        $SCEPEnrollmentInterface.ServerCapabilities = "SHA-1"
+        # $SCEPEnrollmentInterface.ServerCapabilities = ???
 
         # Let's try to build a SCEP Enrollment Message now...
 
@@ -456,24 +494,56 @@ Function Get-NDESCertificate {
                 $PROPTYPE_BINARY,
                 $CR_OUT_BASE64
             )
-            # Perhaps we can also use this to determine the actual Status of the Request
 
-            # This unpacks the Server response
-            # It also seems to install the issued Certificate
-            [void]($SCEPEnrollmentInterface.ProcessResponseMessage(
+            # Process a response message and return the disposition of the message.
+            # https://docs.microsoft.com/en-us/windows/win32/api/certenroll/nf-certenroll-ix509scepenrollment-processresponsemessage
+            $Disposition = $SCEPEnrollmentInterface.ProcessResponseMessage(
                 $SCEPResponse,
                 $XCN_CRYPT_STRING_BASE64
-                ))
+                )
 
-            # https://docs.microsoft.com/en-us/windows/win32/api/certenroll/nf-certenroll-ix509scepenrollment-get_certificate
-            $CertificateBase64 = $SCEPEnrollmentInterface.Certificate($XCN_CRYPT_STRING_BASE64)
+            # https://docs.microsoft.com/en-us/windows/win32/api/certpol/ne-certpol-x509scepdisposition
+            Switch ($Disposition) {
 
-            # We load the Certificate into an X509Certificate2 Object
-            $CertificateObject = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2
-            $CertificateObject.Import([Convert]::FromBase64String($CertificateBase64))
+                $SCEPDispositionFailure {
 
-            # We return this to the User
-            $CertificateObject
+                    $FailInfo = ($SCEPFailInfo | Where-Object { $_.Code -eq $SCEPEnrollmentInterface.FailInfo() })
+
+                    $ErrorText = ''
+                    $ErrorText += "The NDES Server rejected the Certificate Request!`n"
+                    $ErrorText += "SCEP Failure Information: $($FailInfo.Message) ($($FailInfo.Code)) $($FailInfo.Description)`n"
+                    $ErrorText += "Additional Information returned by the Server: $($SCEPEnrollmentInterface.Status().Text)"
+
+                    Write-Error -Message $ErrorText
+
+                }
+
+                $SCEPDispositionSuccess {
+
+                    # https://docs.microsoft.com/en-us/windows/win32/api/certenroll/nf-certenroll-ix509scepenrollment-get_certificate
+                    $CertificateBase64 = $SCEPEnrollmentInterface.Certificate($XCN_CRYPT_STRING_BASE64)
+
+                    # We load the Certificate into an X509Certificate2 Object
+                    $CertificateObject = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2
+                    $CertificateObject.Import([Convert]::FromBase64String($CertificateBase64))
+
+                    # We return this to the User
+                    $CertificateObject
+                }
+
+                $ScepDispositionPending {
+                    Write-Warning -Message "The Enrollment was successful with Status ScepDispositionPending, which is not yet implemented!"
+                }
+
+                $ScepDispositionPendingChallenge {
+                    Write-Warning -Message  "The Enrollment was successful with Status ScepDispositionPendingChallenge, which is not yet implemented!"
+                }
+
+                $SCEPDispositionUnknown {
+                    Write-Error -Message "The Enrollment failed for an unknown Reason"
+                }
+
+            }
 
         }
         Catch {
@@ -496,7 +566,6 @@ Function Get-NDESCertificate {
             catch {
                 # we don't want to return anything here
             }
-            
         }
     }
 }
