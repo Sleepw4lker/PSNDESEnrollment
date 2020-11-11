@@ -176,6 +176,9 @@ Function Get-NDESCertificate {
         New-Variable -Option Constant -Name InheritSubjectFlag -Value 0x00000080
         New-Variable -Option Constant -Name InheritExtensionsFlag -Value 0x00000100
         New-Variable -Option Constant -Name InheritSubjectAltNameFlag -Value 0x00000200
+
+        # https://docs.microsoft.com/en-us/windows/win32/api/certenroll/ne-certenroll-x509privatekeyverify
+        New-Variable -Option Constant -Name X509PrivateKeyVerify_VerifyNone -Value 0
         
         Add-Type -AssemblyName System.Security
 
@@ -438,8 +441,8 @@ Function Get-NDESCertificate {
 
             # https://docs.microsoft.com/en-us/windows/win32/api/certenroll/nf-certenroll-isignercertificate-initialize
             $SignerCertificate.Initialize(
-                0, # MachineContext
-                0, # X509PrivateKeyVerify
+                [Int]($SigningCert.PSBase -match "Machine"),
+                $X509PrivateKeyVerify_VerifyNone,
                 $XCN_CRYPT_STRING_BASE64,
                 [Convert]::ToBase64String($SigningCert.RawData)
             )
