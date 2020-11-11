@@ -52,24 +52,33 @@ Function Get-NDESOTP {
         $Protocol = "https" 
     }
 
-    $ConfigString = "$($Protocol)://$($ComputerName)/certsrv/mscep_admin/"
+    $Arguments = @{
+        Uri = "$($Protocol)://$($ComputerName)/certsrv/mscep_admin/"
+    }
 
     If ($Credential) {
-        # HTTP Basic Authentication, needs to be specifically enabled on the NDES Server
-        $WebRequest = Invoke-WebRequest -Uri $ConfigString -Credential $Credential
+        $Arguments.Add("Credential", $Credential)
     }
     Else {
-        # Try Windows integrated Authentication
-        $WebRequest = Invoke-WebRequest -Uri $ConfigString -UseDefaultCredentials
+        # Use Windows integrated Authentication
+        $Arguments.Add("UseDefaultCredentials", $True)
     }
 
-    If ($WebRequest) {
+    Try {
+        $NdesResponse = Invoke-WebRequest @Arguments
+    }
+    Catch {
+        Write-Error -Message $PSItem.Exception
+        return
+    }
+
+    If ($NdesResponse) {
         
-        switch ($WebRequest.StatusCode) {
+        switch ($NdesResponse.StatusCode) {
          
             200 {
                 # Convert the HTML Output (contains a Byte Order mark, probably UTF-16 LE encoded) to Unicode
-                $HTML = [System.Text.Encoding]::Unicode.GetString($WebRequest.RawContentStream.ToArray())
+                $HTML = [System.Text.Encoding]::Unicode.GetString($NdesResponse.RawContentStream.ToArray())
 
                 # Grab the Password from the HTML Output.
                 $Otp = $($HTML | Select-String -Pattern "[A-F0-9]{$($PasswordLength*2)}" -AllMatches | 
@@ -85,7 +94,7 @@ Function Get-NDESOTP {
                 }
             }
             default {
-                Write-Error "Got HTTP Response $($WebRequest.StatusCode)."
+                Write-Error "Got HTTP Response $($NdesResponse.StatusCode)."
             }
         }
     }

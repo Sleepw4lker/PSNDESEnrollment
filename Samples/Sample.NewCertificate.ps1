@@ -6,7 +6,7 @@ Import-Module PSNDESEnrollment
 $Otp = Get-NDESOTP -ComputerName $NdesServerName
 
 Get-NDESCertificate `
-        -ComputerName $NdesServerName `
-        -Subject "CN=$CommonName" `
-        -ChallengePassword $Otp `
-        -PrivateKeyExportable
+    -ComputerName $NdesServerName `
+    -Subject "CN=$CommonName" `
+    -ChallengePassword $Otp `
+    -PrivateKeyExportable
