@@ -213,31 +213,6 @@ Function Get-NDESCertificate {
 
     process {
 
-        Function Get-HashValue {
-
-            [cmdletbinding()]
-            param(
-                [Parameter(Mandatory=$True)]
-                [Byte[]]
-                $Bytes,
-        
-                [Parameter(Mandatory=$False)]
-                [ValidateSet("MD5","SHA1","SHA256","SHA384","SHA512")]
-                [String]
-                $HashAlgorithm = "SHA1"
-            )
-        
-            $HashAlgorithmObject = [System.Security.Cryptography.HashAlgorithm]::Create($HashAlgorithm)
-            $Hash = $HashAlgorithmObject.ComputeHash($Bytes)
-
-            $Hashhex = ''
-            $Hash | ForEach-Object -Process { 
-                $Hashhex += $_.ToString("X") 
-            }
-
-            return $Hashhex
-        }
-
         # Ensuring the Code will be executed on a supported Operating System
         If ([int32](Get-WmiObject Win32_OperatingSystem).BuildNumber -lt $BUILD_NUMBER_WINDOWS_8_1) {
             Write-Error -Message "This must be executed on Windows 8.1 or newer!"
@@ -509,12 +484,22 @@ Function Get-NDESCertificate {
 
                     $FailInfo = ($SCEPFailInfo | Where-Object { $_.Code -eq $SCEPEnrollmentInterface.FailInfo() })
 
-                    $ErrorText = ''
-                    $ErrorText += "The NDES Server rejected the Certificate Request!`n"
-                    $ErrorText += "SCEP Failure Information: $($FailInfo.Message) ($($FailInfo.Code)) $($FailInfo.Description)`n"
-                    $ErrorText += "Additional Information returned by the Server: $($SCEPEnrollmentInterface.Status().Text)"
+                    $ErrorMessage = ''
+                    $ErrorMessage += "The NDES Server rejected the Certificate Request!`n"
+                    $ErrorMessage += "SCEP Failure Information: $($FailInfo.Message) ($($FailInfo.Code)) $($FailInfo.Description)`n"
+                    $ErrorMessage += "Additional Information returned by the Server: $($SCEPEnrollmentInterface.Status().Text)`n"
 
-                    Write-Error -Message $ErrorText
+                    If ($SCEPEnrollmentInterface.Status().Text -match "0x800b0110") {
+                        $ErrorMessage += "Possible reason(s): The OTP has already been used before."
+                    }
+                    If ($SCEPEnrollmentInterface.Status().Text -match "0x80096004") {
+                        $ErrorMessage += "Possible reason(s): The NDES Server requires an but none was supplied."
+                    }
+                    If ($SCEPEnrollmentInterface.Status().Text -match "0x80070490") {
+                        $ErrorMessage += "Possible reason(s): The OTP supplied is unknown to the NDES Server."
+                    }
+
+                    Write-Error -Message $ErrorMessage
 
                 }
 
