@@ -61,7 +61,7 @@
     Defaults to "POST".
 
     .OUTPUTS
-    System.Security.Cryptography.X509Certificates.X509Certificate. The issued Certificate returned by the NDES Server.
+    System.Security.Cryptography.X509Certificates.X509Certificate. Returns the issued Certificate returned by the NDES Server.
 #>
 Function Get-NDESCertificate {
 
@@ -104,7 +104,7 @@ Function Get-NDESCertificate {
             Mandatory=$False
             )]
         [ValidateScript({$_.HasPrivateKey})]
-        [X509Certificate]
+        [System.Security.Cryptography.X509Certificates.X509Certificate]
         $SigningCert,
 
         [Parameter(Mandatory=$False)]
@@ -141,12 +141,6 @@ Function Get-NDESCertificate {
         New-Variable -Option Constant -Name CR_OUT_BASE64 -Value 1
         New-Variable -Option Constant -Name CR_IN_BASE64HEADER -Value 0
         New-Variable -Option Constant -Name CR_IN_BASE64 -Value 1
-        New-Variable -Option Constant -Name CR_IN_PKCS7 -Value 0x300
-        New-Variable -Option Constant -Name CR_IN_SCEP -Value 0x00010000
-        New-Variable -Option Constant -Name CR_IN_SCEPPOST -Value 0x02000000
-
-        New-Variable -Option Constant -Name CR_PROP_SCEPSERVERCERTS -Value 1000
-        New-Variable -Option Constant -Name CR_PROP_SCEPSERVERCAPABILITIES -Value 1001
 
         New-Variable -Option Constant -Name XCN_CRYPT_STRING_BASE64HEADER -Value 0
         New-Variable -Option Constant -Name XCN_CRYPT_STRING_BASE64 -Value 1
@@ -161,6 +155,7 @@ Function Get-NDESCertificate {
         New-Variable -Option Constant -Name XCN_CERT_ALT_NAME_USER_PRINCIPLE_NAME -Value 11
 
         New-Variable -Option Constant -Name BUILD_NUMBER_WINDOWS_8_1 -Value 9600
+        New-Variable -Option Constant -Name BUILD_NUMBER_WINDOWS_10 -Value 10240
 
         # https://docs.microsoft.com/en-us/windows/win32/api/certpol/ne-certpol-x509scepdisposition
         New-Variable -Option Constant -Name SCEPDispositionFailure -Value 2
@@ -218,7 +213,7 @@ Function Get-NDESCertificate {
 
         # Ensuring the Code will be executed on a supported Operating System
         If ([int32](Get-WmiObject Win32_OperatingSystem).BuildNumber -lt $BUILD_NUMBER_WINDOWS_8_1) {
-            Write-Error -Message "This must be executed on Windows 8.1 or newer!"
+            Write-Error -Message "This must be executed on Windows 8.1/Windows Server 2012 R2 or newer!"
             Return 
         }
 
@@ -256,7 +251,7 @@ Function Get-NDESCertificate {
         # GetCAProperty with the CR_PROP_SCEPSERVERCAPABILITIES PropId
         # There is also a Method put_ServerCapabilities which maybe can be fed with the output
         Try {
-            $GetCACaps = Invoke-WebRequest -uri "$($ConfigString)?operation=GetCACaps"
+            $GetCACaps = (Invoke-WebRequest -uri "$($ConfigString)?operation=GetCACaps").Content
         }
         Catch {
             Write-Error -Message $PSItem.Exception
@@ -268,7 +263,7 @@ Function Get-NDESCertificate {
         # Determining if we create an entirely new Certificate Request or inherit Settings from an old one
         If ($SigningCert) {
 
-            If ($GetCACaps.Content -match "Renewal") {
+            If ($GetCACaps -match "Renewal") {
 
                 $X509RequestInheritOptions = $InheritDefault
                 $X509RequestInheritOptions += $InheritSubjectAltNameFlag
@@ -369,18 +364,9 @@ Function Get-NDESCertificate {
         $Pkcs10.PrivateKey.ExportPolicy = [int]($PrivateKeyExportable.IsPresent)
         $Pkcs10.PrivateKey.ProviderName = $KeyStorageProvider
 
-        # Initializing the Request Interface that does Submission and Retrieval
-        $CertRequestInterface = New-Object -ComObject "CertificateAuthority.Request"
-
         # SCEP GetCACert Operation
         Try {
-            $GetCACert = $CertRequestInterface.GetCAProperty(
-                $ConfigString,
-                $CR_PROP_SCEPSERVERCERTS,
-                0,
-                $PROPTYPE_BINARY,
-                $CR_OUT_BASE64
-            )
+            $GetCACert = (Invoke-WebRequest -uri "$($ConfigString)?operation=GetCACert").Content
         }
         Catch {
             Write-Error -Message $PSItem.Exception
@@ -389,7 +375,7 @@ Function Get-NDESCertificate {
 
         # Decoding the CMS (PKCS#7 Message that was returned from the NDES Server)
         $Pkcs7CaCert = New-Object System.Security.Cryptography.Pkcs.SignedCms
-        $Pkcs7CaCert.Decode([Convert]::FromBase64String($GetCACert))
+        $Pkcs7CaCert.Decode($GetCACert)
         
         # Identify the Root CA Certificate that was delivered with the Chain
         # We must specify it's MD5 Hash when initializing the IX509SCEPEnrollment Interface
@@ -398,11 +384,6 @@ Function Get-NDESCertificate {
         # Initialize the IX509SCEPEnrollment Interface
         # https://docs.microsoft.com/en-us/windows/win32/api/certenroll/nn-certenroll-ix509scepenrollment
         $SCEPEnrollmentInterface = New-Object -ComObject "X509Enrollment.CX509SCEPEnrollment"
-
-        # Sets the preferred hash and encryption algorithms for the request.
-        # If you do not set this property, then the default hash and encryption algorithms will be used.
-        # https://docs.microsoft.com/en-us/windows/win32/api/certenroll/nf-certenroll-ix509scepenrollment-put_servercapabilities
-        # $SCEPEnrollmentInterface.ServerCapabilities = ???
 
         # Let's try to build a SCEP Enrollment Message now...
 
@@ -413,7 +394,7 @@ Function Get-NDESCertificate {
                 $Pkcs10,
                 (Get-HashValue -Bytes $RootCaCert.RawData -HashAlgorithm "MD5"), # no Joke... MD5...
                 $XCN_CRYPT_STRING_HEX,
-                $GetCACert,
+                [Convert]::ToBase64String($GetCACert),
                 $XCN_CRYPT_STRING_BASE64
             )
 
@@ -422,6 +403,11 @@ Function Get-NDESCertificate {
             Write-Error -Message $PSItem.Exception
             return
         }
+
+        # Sets the preferred hash and encryption algorithms for the request.
+        # If you do not set this property, then the default hash and encryption algorithms will be used.
+        # https://docs.microsoft.com/en-us/windows/win32/api/certenroll/nf-certenroll-ix509scepenrollment-put_servercapabilities
+        $SCEPEnrollmentInterface.ServerCapabilities = $GetCACaps
 
         <#
             https://tools.ietf.org/html/draft-nourse-scep-23#section-2.2
@@ -441,8 +427,8 @@ Function Get-NDESCertificate {
 
             # https://docs.microsoft.com/en-us/windows/win32/api/certenroll/nf-certenroll-isignercertificate-initialize
             $SignerCertificate.Initialize(
-                [Int]($SigningCert.PSBase -match "Machine"),
-                $X509PrivateKeyVerify_VerifyNone,
+                [Int]($SigningCert.PSBase -match "Machine"), # 0 = User, 1 = Machine
+                $X509PrivateKeyVerify_VerifyNone, # We did this during Parameter Validation
                 $XCN_CRYPT_STRING_BASE64,
                 [Convert]::ToBase64String($SigningCert.RawData)
             )
@@ -452,38 +438,41 @@ Function Get-NDESCertificate {
         # Building the PKCS7 Message for the SCEP Enrollment
         # https://docs.microsoft.com/en-us/windows/win32/api/certenroll/nf-certenroll-ix509scepenrollment-createrequestmessage
         $SCEPRequestMessage = $SCEPEnrollmentInterface.CreateRequestMessage($XCN_CRYPT_STRING_BASE64)
-
+        
         # Submission to the NDES Server
-        $RequestFlags = $CR_IN_BASE64
-        $RequestFlags = $RequestFlags -bor $CR_IN_SCEP
+        try {
 
-        If ($Method -eq "POST") {
-            $RequestFlags = $RequestFlags -bor $CR_IN_SCEPPOST
-        }
+            If ($Method -eq "POST") {
 
-        Try {
-            [void]($CertRequestInterface.Submit(
-                $RequestFlags,
-                $SCEPRequestMessage,
-                "",
-                $ConfigString
-            ))
+                If ($GetCACaps -match "POSTPKIOperation") {
+                    $SCEPResponse = Invoke-WebRequest `
+                        -Body ([Convert]::FromBase64String($SCEPRequestMessage)) `
+                        -Method 'POST' `
+                        -Uri "$($ConfigString)?operation=PKIOperation" `
+                        -Headers @{'Content-Type' = 'application/x-pki-message'}
+                }
+                Else {
+                    Write-Warning -Message "The Server indicates that it doesnt support the 'POST' Method. Falling back to 'GET'."
+                    $Method = "GET"
+                }
+            }
+
+            If ($Method -eq "GET") {
+                $SCEPResponse = Invoke-WebRequest `
+                    -Method 'GET' `
+                    -Uri "$($ConfigString)?operation=PKIOperation&message=$([uri]::EscapeDataString($SCEPRequestMessage))" `
+                    -Headers @{'Content-Type' = 'application/x-pki-message'}
+            }
+
+            $SCEPResponse = [Convert]::ToBase64String($ScepResponse.Content)
+
         }
-        Catch {
+        catch {
             Write-Error -Message $PSItem.Exception
-            return  
+            return
         }
-
+        
         Try {
-
-            # Here's where we get the Certificate from
-            # https://docs.microsoft.com/en-us/windows/win32/api/certcli/nf-certcli-icertrequest2-getfullresponseproperty
-            $SCEPResponse = $CertRequestInterface.GetFullResponseProperty(
-                $FR_PROP_FULLRESPONSE,
-                0,
-                $PROPTYPE_BINARY,
-                $CR_OUT_BASE64
-            )
 
             # Process a response message and return the disposition of the message.
             # https://docs.microsoft.com/en-us/windows/win32/api/certenroll/nf-certenroll-ix509scepenrollment-processresponsemessage
@@ -497,36 +486,42 @@ Function Get-NDESCertificate {
 
                 $SCEPDispositionFailure {
 
-                    $FailInfo = ($SCEPFailInfo | Where-Object { $_.Code -eq $SCEPEnrollmentInterface.FailInfo() })
-
                     $ErrorMessage = ''
                     $ErrorMessage += "The NDES Server rejected the Certificate Request!`n"
-                    $ErrorMessage += "SCEP Failure Information: $($FailInfo.Message) ($($FailInfo.Code)) $($FailInfo.Description)`n"
-                    $ErrorMessage += "Additional Information returned by the Server: $($SCEPEnrollmentInterface.Status().Text)`n"
 
-                    # CERT_E_WRONG_USAGE
-                    If ($SCEPEnrollmentInterface.Status().Text -match "0x800b0110") {
-                        $ErrorMessage += "Possible reason(s): The Challenge Password has already been used before."
-                    }
+                    # The Failinfo Method is only present in Windows 10
+                    # Windows 8.1 / 2012 R2 Users therefore won't get any fancy error message, sadly
+                    If ([int32](Get-WmiObject Win32_OperatingSystem).BuildNumber -ge $BUILD_NUMBER_WINDOWS_10) {
 
-                    # TRUST_E_CERT_SIGNATURE
-                    If ($SCEPEnrollmentInterface.Status().Text -match "0x80096004") {
-                        $ErrorMessage += "Possible reason(s): The NDES Server requires a Challenge Password but none was supplied."
-                    }
+                        $FailInfo = ($SCEPFailInfo | Where-Object { $_.Code -eq $SCEPEnrollmentInterface.FailInfo() })
 
-                    # ERROR_NOT_FOUND
-                    If ($SCEPEnrollmentInterface.Status().Text -match "0x80070490") {
-                        $ErrorMessage += "Possible reason(s): The Challenge Password supplied is unknown to the NDES Server."
-                    }
+                        $ErrorMessage += "SCEP Failure Information: $($FailInfo.Message) ($($FailInfo.Code)) $($FailInfo.Description)`n"
+                        $ErrorMessage += "Additional Information returned by the Server: $($SCEPEnrollmentInterface.Status().Text)`n"
 
-                    # CERTSRV_E_BAD_REQUESTSUBJECT
-                    If ($SCEPEnrollmentInterface.Status().Text -match "0x80094001") {
-                        $ErrorMessage += "Possible reason(s): The CA denied your request because an invalid Subject was requested."
-                    }
+                        # CERT_E_WRONG_USAGE
+                        If ($SCEPEnrollmentInterface.Status().Text -match "0x800b0110") {
+                            $ErrorMessage += "Possible reason(s): The Challenge Password has already been used before."
+                        }
 
-                    # RPC_S_SERVER_UNAVAILABLE
-                    If ($SCEPEnrollmentInterface.Status().Text -match "0x800706ba") {
-                        $ErrorMessage += "Possible reason(s): The NDES Server was unable to contact the Certification Authority."
+                        # TRUST_E_CERT_SIGNATURE
+                        If ($SCEPEnrollmentInterface.Status().Text -match "0x80096004") {
+                            $ErrorMessage += "Possible reason(s): The NDES Server requires a Challenge Password but none was supplied."
+                        }
+
+                        # ERROR_NOT_FOUND
+                        If ($SCEPEnrollmentInterface.Status().Text -match "0x80070490") {
+                            $ErrorMessage += "Possible reason(s): The Challenge Password supplied is unknown to the NDES Server."
+                        }
+
+                        # CERTSRV_E_BAD_REQUESTSUBJECT
+                        If ($SCEPEnrollmentInterface.Status().Text -match "0x80094001") {
+                            $ErrorMessage += "Possible reason(s): The CA denied your request because an invalid Subject was requested."
+                        }
+
+                        # RPC_S_SERVER_UNAVAILABLE
+                        If ($SCEPEnrollmentInterface.Status().Text -match "0x800706ba") {
+                            $ErrorMessage += "Possible reason(s): The NDES Server was unable to contact the Certification Authority."
+                        }
                     }
 
                     Write-Error -Message $ErrorMessage
@@ -571,7 +566,6 @@ Function Get-NDESCertificate {
         $DnObject,
         $SansExtension,
         $Sans,
-        $CertRequestInterface,
         $SCEPEnrollmentInterface,
         $SignerCertificate | ForEach-Object -Process {
 
