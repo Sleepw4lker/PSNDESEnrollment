@@ -177,6 +177,9 @@ Function Get-NDESCertificate {
         
         Add-Type -AssemblyName System.Security
 
+        # This hides the Status Indicators of the Invoke-WebRequest Calls later on
+        $ProgressPreference = 'SilentlyContinue'
+
         # https://tools.ietf.org/html/draft-nourse-scep-23#section-3.1.1.4
         $SCEPFailInfo = @(
 

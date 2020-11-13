@@ -1,10 +1,24 @@
 # PSNDESEnrollment
 
-PowerShell Module to request One-Time Password (OTP) from a Network Device Enrollment Service (NDES) and then to enroll for a User or Machine Certificate via the  [Simple Certificare Enrollment Protocol (SCEP)](https://tools.ietf.org/html/draft-nourse-scep-23).
+PowerShell Module to request or renew a User or Machine Certificate via the [Simple Certificate Enrollment Protocol (SCEP)](https://tools.ietf.org/html/draft-nourse-scep-23). The Microsoft Implementation of SCEP is called Network Device Enrollment Service (NDES), thus the name.
 
-Supports Windows 8.1 / Windows Server 2012 R2 or newer.
+Supported Operating Systems:
 
-Contains the following functions:
+* Windows 8.1
+* Windows 10
+* Windows Server 2012 R2
+* Windows Server 2016
+* Windows Server 2019
+
+Earlier Operating Systems, PowerShell Core and Linux are not supported, as native OS Interfaces are used that are not present in these.
+
+Supported SCEP Implementations:
+
+* Microsoft Network Device Enrollment Service (NDES)
+
+Other SCEP Implementations should be easy to implement but I currently have none to test against.
+
+The following functions get exported:
 * [Get-NDESOTP](docs/Get-NDESOTP.md)
 * [Get-NDESCertificate](docs/Get-NDESCertificate.md)
 
